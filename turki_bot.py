@@ -4,14 +4,9 @@ from datetime import datetime
 
 TOKEN = "8943196164:AAE4n05GmR6lUz2EK3hunSqvtqJqeKwkSN8"
 CHAT_ID = "8098064670"
+TD_API_KEY = "c60218ea1d4248bf85d96e571a12491e"
 
-SYMBOLS = {
-    "EURUSD":  "EURUSDT",
-    "GBPUSD":  "GBPUSDT",
-    "USDJPY":  "USDUSDT",
-    "BTCUSDT": "BTCUSDT",
-    "CADJPY":  "CADJPY"
-}
+SYMBOLS = ["EUR/USD", "GBP/USD", "USD/JPY", "BTC/USD", "CAD/JPY"]
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -21,17 +16,32 @@ def send_telegram(message):
     except:
         pass
 
-def get_candles(binance_symbol, limit=100):
-    url = "https://api.binance.com/api/v3/klines"
-    params = {"symbol": binance_symbol, "interval": "15m", "limit": limit}
+def get_candles(symbol, limit=100):
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol,
+        "interval": "15min",
+        "outputsize": limit,
+        "apikey": TD_API_KEY
+    }
     try:
-        response = requests.get(url, params=params, timeout=10)
-        candles = response.json()
-        if isinstance(candles, list):
-            return [{"open": float(c[1]), "high": float(c[2]),
-                     "low": float(c[3]), "close": float(c[4])} for c in candles]
-    except:
-        pass
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        if "values" in data:
+            candles = []
+            # Twelve Data يرجع الأحدث أولاً، نعكسها
+            for c in reversed(data["values"]):
+                candles.append({
+                    "open": float(c["open"]),
+                    "high": float(c["high"]),
+                    "low": float(c["low"]),
+                    "close": float(c["close"])
+                })
+            return candles
+        else:
+            print(f"⚠️ {symbol}: {data.get('message', 'لا بيانات')}")
+    except Exception as e:
+        print(f"❌ {symbol}: {e}")
     return []
 
 def find_highs_lows(candles):
@@ -50,7 +60,7 @@ def analyze(candles, symbol):
     last = candles[-1]
     prev_high = highs[-1]
     prev_low = lows[-1]
-    r = 5 if "JPY" in symbol else 5
+    r = 3 if "JPY" in symbol else (1 if "BTC" in symbol else 5)
 
     if last["low"] < prev_low and last["close"] > prev_high:
         entry = last["close"]
@@ -79,7 +89,7 @@ def format_msg(s, symbol):
 ━━━━━━━━━━━━━━━
 💧 <b>Liquidity Sweep:</b> {s['liq']}
 🎯 <b>الدخول:</b> {s['entry']}
-�� <b>Stop Loss:</b> {s['sl']}
+🛑 <b>Stop Loss:</b> {s['sl']}
 ━━━━━━━━━━━━━━━
 ✅ <b>TP1 (50%):</b> {s['tp1']}
 ✅ <b>TP2 (25%):</b> {s['tp2']}
@@ -88,29 +98,29 @@ def format_msg(s, symbol):
 ⚠️ ريسك 1% فقط"""
 
 def main():
-    send_telegram("🤖 <b>TurkiTrader يراقب 5 أزواج!</b>\n📊 EURUSD | GBPUSD | USDJPY | BTCUSDT | CADJPY\n👀 كل دقيقة...")
-    print("✅ البوت شغّال — يراقب 5 أزواج")
+    send_telegram("🤖 <b>TurkiTrader - بيانات فوركس حقيقية!</b>\n📊 EUR/USD | GBP/USD | USD/JPY | BTC/USD | CAD/JPY\n👀 كل دقيقة...")
+    print("✅ البوت شغّال — بيانات فوركس حقيقية")
     last_signals = {s: None for s in SYMBOLS}
 
     while True:
         now = datetime.now()
-        for display_name, binance_name in SYMBOLS.items():
+        for symbol in SYMBOLS:
             try:
-                candles = get_candles(binance_name)
+                candles = get_candles(symbol)
                 if not candles:
-                    print(f"⚠️ [{now.strftime('%H:%M')}] {display_name}: ما في بيانات")
                     continue
-                signal = analyze(candles, display_name)
+                signal = analyze(candles, symbol)
                 if signal:
-                    last = last_signals[display_name]
+                    last = last_signals[symbol]
                     if last is None or (now - last).seconds > 3600:
-                        send_telegram(format_msg(signal, display_name))
-                        last_signals[display_name] = now
-                        print(f"✅ {display_name}: {signal['signal']} - {now.strftime('%H:%M')}")
+                        send_telegram(format_msg(signal, symbol))
+                        last_signals[symbol] = now
+                        print(f"✅ {symbol}: {signal['signal']} - {now.strftime('%H:%M')}")
                 else:
-                    print(f"👀 [{now.strftime('%H:%M')}] {display_name}: لا إشارة")
+                    print(f"👀 [{now.strftime('%H:%M')}] {symbol}: لا إشارة")
+                time.sleep(8)  # احترام حد الـ API المجاني
             except Exception as ex:
-                print(f"❌ {display_name}: {ex}")
+                print(f"❌ {symbol}: {ex}")
         time.sleep(60)
 
 if __name__ == "__main__":
